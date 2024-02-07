@@ -1,0 +1,28 @@
+{
+  "name": "base-bot",
+  "version": "1.0.0",
+  "description": "base bot",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hropotova/base-bot.git"
+  },
+  "author": "Vitaliy Vovchok",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Hropotova/base-bot/issues"
+  },
+  "homepage": "https://github.com/Hropotova/base-bot#readme",
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "exceljs": "^4.4.0",
+    "express": "^4.18.2",
+    "node-telegram-bot-api": "^0.64.0"
+  },
+  "devDependencies": {
+    "axios": "^1.6.2"
+  }
+}
