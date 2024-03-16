@@ -160,11 +160,12 @@ const walletParser = async (addresses, bot, chatId) => {
 
                     let balanceInETH;
 
-                    if (balance) {
+                    if (balance?.valueUsd) {
                         balanceInETH = (balance ? balance.valueUsd : 0) / ethereumPrice || 0;
                     } else {
                         balanceInETH = (balanceInToken * priceInUSD) / ethereumPrice || 0;
                     }
+
                     console.log('totalReceived', totalReceived);
                     console.log('totalSpent', totalSpent);
                     const realisedProfit = totalReceived - totalSpent;

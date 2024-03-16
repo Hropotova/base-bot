@@ -4,11 +4,11 @@ async function getEthereumPrice() {
     try {
         const response = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
             params: {
-                ids: 'base',
+                ids: 'ethereum',
                 vs_currencies: 'usd'
             }
         });
-        return response.data.base.usd;
+        return response.data.ethereum.usd;
     } catch (error) {
         console.error('Error fetching Ethereum price:', error);
         throw error;
@@ -18,7 +18,7 @@ async function getEthereumPrice() {
 async function getTokenPrice(contract) {
     try {
         const response = await axios.get(
-            `https://public-api.birdeye.so/defi/price?address=${contract}`,
+            `https://public-api.birdeye.so/defi/price?include_liquidity=true&address=${contract}`,
             {
                 headers: {
                     'x-chain': 'base',
