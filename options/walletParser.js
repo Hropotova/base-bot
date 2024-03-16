@@ -35,6 +35,7 @@ const walletParser = async (addresses, bot, chatId) => {
                         transactionMap[transactions[0].contractAddress] = transactions;
                     }
                 });
+
                 let results = [];
 
                 for (let contract of tokenContracts) {
@@ -45,6 +46,7 @@ const walletParser = async (addresses, bot, chatId) => {
                     const tokenAddress = parseTransaction.logs.filter(
                         (logItem) => logItem.address.toLowerCase() === contract.toLowerCase()
                     );
+
                     const contractAddress = tokenAddress[0].address;
 
                     const tokenPrice = await getTokenPrice(contractAddress);

@@ -7,10 +7,10 @@ const {
     getAddressListTransaction,
     getContractAddressTransactions
 } = require('../api/etherscan');
-const {getEthereumPrice, getTokenPrice, getHoneypot} = require('../api/crypto');
+const {getEthereumPrice, getTokenPrice} = require('../api/crypto');
 const {ERC20_ABI} = require('../constants/erc2_abi');
 
-const web3 = new Web3(`https://mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`);
+const web3 = new Web3(`https://base-mainnet.g.alchemy.com/v2/UO8879aP4CewayIBNOeZsaWkX4no-L7M`);
 
 const walletsParser = async (addresses, bot, chatId) => {
     let allResults = [];
@@ -50,50 +50,11 @@ const walletsParser = async (addresses, bot, chatId) => {
             const balanceInToken = balance / Math.pow(10, decimals);
 
             const tokenPrice = await getTokenPrice(contract);
-            let priceInUSD = tokenPrice ? tokenPrice : 0;
+            let priceInUSD = tokenPrice?.value ? tokenPrice?.value : 0;
+            let tokenLiquidity = tokenPrice?.liquidity ? tokenPrice?.liquidity / ethereumPrice : 100000000000000;
 
             let scamFlags;
-            let simulationSuccess;
             let blockNumber
-            let tokenPair = 'pair not found';
-
-            try {
-                const honeypot = await getHoneypot(contract);
-                tokenPair = honeypot.pairAddress;
-                simulationSuccess = honeypot.simulationSuccess;
-                if (simulationSuccess) {
-                    scamFlags = honeypot.honeypotResult.isHoneypot || honeypot.pair.liquidity < 0.1;
-                } else {
-                    scamFlags = true
-                }
-
-                if (honeypot?.flags.includes('EFFECTIVE_HONEYPOT_LOW_SELL_LIMIT')) {
-                    scamFlags = true;
-                }
-
-                const pastTransactions = await web3.eth.getPastLogs({
-                    address: tokenPair,
-                    fromBlock: 0,
-                    toBlock: 'latest'
-                });
-
-                if (pastTransactions.length === 0) {
-                    throw new Error("No transactions found for this contract");
-                }
-
-                const firstTransaction = pastTransactions[0].transactionHash;
-
-                const receipt = await web3.eth.getTransactionReceipt(firstTransaction);
-
-                const block = await web3.eth.getBlock(receipt.blockNumber);
-                blockNumber = block.number + 3;
-            } catch (error) {
-                if (error.response && error.response.status === 404) {
-                    console.log('Pair not found for contract: ', contract);
-                } else {
-                    console.error('Error fetching pair: ', error);
-                }
-            }
 
             const ethResults = [];
 
@@ -174,9 +135,9 @@ const walletsParser = async (addresses, bot, chatId) => {
                 if (transaction.from.toLocaleLowerCase() !== address.toLocaleLowerCase()) {
                     scumDelete = true
                 }
-                let wethLog = transactionReceipt.logs.filter(logItem => logItem.address === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' && logItem.topics.length === 2);
+                let wethLog = transactionReceipt.logs.filter(logItem => logItem.address === '0x4200000000000000000000000000000000000006' && logItem.topics.length === 2);
                 if (wethLog.length === 0) {
-                    wethLog = transactionReceipt.logs.filter(logItem => logItem.address === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' && logItem.topics.length === 3);
+                    wethLog = transactionReceipt.logs.filter(logItem => logItem.address === '0x4200000000000000000000000000000000000006' && logItem.topics.length === 3);
                 }
                 let totalEthAmount = 0;
                 const uniqueWethLog = Array.from(
@@ -207,7 +168,19 @@ const walletsParser = async (addresses, bot, chatId) => {
                     totalReceived += result.totalEthAmount;
                 }
             });
-            const balanceInETH = (balanceInToken * priceInUSD) / ethereumPrice;
+            let balanceInETH;
+
+            if (balance?.valueUsd) {
+                balanceInETH = (balance ? balance.valueUsd : 0) / ethereumPrice || 0;
+            } else {
+                balanceInETH = (balanceInToken * priceInUSD) / ethereumPrice || 0;
+            }
+
+            if (tokenLiquidity < process.env.LIQUIDITY) {
+                console.log('liquidity', tokenLiquidity)
+                balanceInETH = 0
+            }
+
             const realisedProfit = totalReceived - totalSpent;
             const unrealisedProfit = balanceInETH - totalSpent;
 
@@ -232,7 +205,6 @@ const walletsParser = async (addresses, bot, chatId) => {
                 avgGasPrice: `⛽️ ${totalGasPrice.toFixed(0)}`,
                 acquisitionPrice: acquisitionPrice.toFixed(15),
                 contractAddress: contract,
-                pairAddress: tokenPair,
                 scam: `${scamFlags ? 'TRUE' : 'FALSE'}`,
                 totalSpent: totalSpent.toFixed(3),
                 totalReceived: totalReceived.toFixed(3),

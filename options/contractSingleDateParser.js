@@ -7,11 +7,11 @@ const {
     getContractAddressTransactions,
     getAddressTransactionsSorted,
 } = require('../api/etherscan');
-const {getEthereumPrice, getWalletBalance} = require('../api/crypto');
+const {getEthereumPrice, getWalletBalance, getTokenPrice} = require('../api/crypto');
 
 const {ERC20_ABI} = require('../constants/erc2_abi');
 
-const web3 = new Web3(`https://mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`);
+const web3 = new Web3(`https://base-mainnet.g.alchemy.com/v2/UO8879aP4CewayIBNOeZsaWkX4no-L7M`);
 
 const contractSingleDateParser = async (address, bot, chatId, addressState) => {
 
@@ -39,10 +39,13 @@ const contractSingleDateParser = async (address, bot, chatId, addressState) => {
         const tokenContract = new web3.eth.Contract(ERC20_ABI, addressState);
         const symbol = await tokenContract.methods.symbol().call();
         const decimals = await tokenContract.methods.decimals().call();
+        const contracttokenBalance = await tokenContract.methods.balanceOf(contract).call();
+        const balanceInToken = contracttokenBalance / Math.pow(10, decimals);
 
         const balance = walletBalance.find(i => i.address.toLowerCase() === addressState.toLowerCase()) || 0;
 
         contactSymbol = symbol;
+
         const ethResults = [];
         let totalSpent = 0;
         let totalReceived = 0;
@@ -56,14 +59,6 @@ const contractSingleDateParser = async (address, bot, chatId, addressState) => {
         );
 
         const buyersTxTr = new Set();
-
-        let totalGasPrice
-
-        if (contractAddressTransactions.length === 0) {
-            totalGasPrice = 0
-        } else {
-            totalGasPrice = Number(web3.utils.fromWei(contractAddressTransactions[0].gasPrice, 'Gwei'));
-        }
 
         contractAddressTransactions.forEach((tx) => {
             if (tx.to.toLowerCase() === contract.toLowerCase()) {
@@ -90,7 +85,7 @@ const contractSingleDateParser = async (address, bot, chatId, addressState) => {
                                     name: '_value',
                                 },
                             ],
-                            log.data
+                            log.data,
                         );
 
                         const tokenAmount = decodedData._value / 10 ** decimals;
@@ -113,23 +108,22 @@ const contractSingleDateParser = async (address, bot, chatId, addressState) => {
                 transfer = true;
             }
 
-            const wethLog = transactionReceipt.logs.filter(logItem => logItem.address === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' && logItem.topics.length === 2);
+            const wethLog = transactionReceipt.logs.filter(logItem => logItem.address === '0x4200000000000000000000000000000000000006' && logItem.topics.length === 2);
 
             let totalEthAmount = 0;
-
             const uniqueWethLog = Array.from(
                 wethLog.reduce((map, obj) => map.set(obj.data, obj), new Map()).values()
-            );
+            )
 
             uniqueWethLog.map(logItem => {
                 const decodedData = web3.eth.abi.decodeParameters(
                     [
                         {
                             type: 'uint256',
-                            name: '_value'
+                            name: '_value',
                         }
                     ],
-                    logItem.data
+                    logItem.data,
                 );
                 const ethAmount = Web3.utils.fromWei(decodedData._value, 'ether');
                 totalEthAmount += parseFloat(ethAmount);
@@ -147,9 +141,19 @@ const contractSingleDateParser = async (address, bot, chatId, addressState) => {
             }
         });
 
-        const balanceInUSD = balance.valueUsd / ethereumPrice;
+        const tokenPrice = await getTokenPrice(addressState);
+        let priceInUSD = tokenPrice?.value ? tokenPrice?.value : 0;
 
-        const tokenBalance = balance.valueUsd < 100 ? 0 : balanceInUSD - totalSpent;
+        let balanceInUSD
+        let tokenBalance;
+        if (balance?.valueUsd) {
+            balanceInUSD = balance.valueUsd / ethereumPrice;
+            tokenBalance = balance.valueUsd < 100 ? 0 : balanceInUSD - totalSpent;
+        } else {
+            balanceInUSD = (balanceInToken * priceInUSD) / ethereumPrice;
+            tokenBalance = (balanceInToken * priceInUSD) < 100 ? 0 : balanceInUSD - totalSpent;
+        }
+
 
         const profit = totalReceived - totalSpent;
 
@@ -161,7 +165,6 @@ const contractSingleDateParser = async (address, bot, chatId, addressState) => {
             walletAddress: contract,
             countTransactions: `# ${addressListTransactions.length}`,
             pnl: pnl.toFixed(3),
-            avgGasPrice: `⛽️ ${totalGasPrice.toFixed(0)}`,
             balance: tokenBalance === 0 ? 0 : tokenBalance.toFixed(3),
             profit: profit.toFixed(3),
             totalSpent: totalSpent.toFixed(3),
@@ -183,7 +186,6 @@ const contractSingleDateParser = async (address, bot, chatId, addressState) => {
         {header: 'trns', key: 'countTransactions', width: 10},
         {header: 'PnL', key: 'pnl', width: 10},
         {header: 'Spent', key: 'totalSpent', width: 10},
-        {header: 'Gas', key: 'avgGasPrice', width: 10},
         {header: 'Transfer', key: 'transfer', width: 10},
         {header: 'unPnL', key: 'balance', width: 10},
         {header: 'realPnL', key: 'profit', width: 15},
