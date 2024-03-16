@@ -27,7 +27,7 @@ async function getTokenPrice(contract) {
             },
         );
 
-        const data = response?.data?.data?.value
+        const data = response?.data?.data
 
         return data;
     } catch (error) {

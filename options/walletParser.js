@@ -55,7 +55,8 @@ const walletParser = async (addresses, bot, chatId) => {
                     const tokenBalance = await tokenContract.methods.balanceOf(address).call();
                     const balanceInToken = tokenBalance / Math.pow(10, decimals);
 
-                    let priceInUSD = tokenPrice ? tokenPrice : 0;
+                    let priceInUSD = tokenPrice?.value ? tokenPrice?.value : 0;
+                    let tokenLiquidity = tokenPrice?.liquidity ? tokenPrice?.liquidity / ethereumPrice : 100000000000000;
                     const balance = walletBalance.find(i => i.address.toLowerCase() === contract.toLowerCase()) || 0;
 
                     const ethResults = [];
@@ -164,6 +165,11 @@ const walletParser = async (addresses, bot, chatId) => {
                         balanceInETH = (balance ? balance.valueUsd : 0) / ethereumPrice || 0;
                     } else {
                         balanceInETH = (balanceInToken * priceInUSD) / ethereumPrice || 0;
+                    }
+
+                    if (tokenLiquidity < process.env.LIQUIDITY) {
+                        console.log('liquidity', tokenLiquidity)
+                        balanceInETH = 0
                     }
 
                     console.log('totalReceived', totalReceived);
