@@ -3,6 +3,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
 const {walletParser} = require('./options/walletParser');
+const {walletsParser} = require('./options/walletsParser');
 const {contractSingleDateParser} = require('./options/contractSingleDateParser');
 const {contractRangeDateParser} = require("./options/contractRangeDateParser");
 
@@ -21,6 +22,7 @@ bot.onText(/\/start/, (msg) => {
             inline_keyboard: [
                 [{text: 'Wallet address', callback_data: 'option1'}],
                 [{text: 'Contract address', callback_data: 'option2'}],
+                [{text: 'Wallet addresses', callback_data: 'option3'}],
             ]
         })
     };
@@ -77,6 +79,7 @@ bot.on('message', async (msg) => {
         } else if (userState[chatId] === 'range_date') {
             await contractRangeDateParser(message, bot, chatId, contractState);
         } else if (userState[chatId] === 'option3') {
+            await walletsParser(message, bot, chatId);
         }
 
     } catch (error) {
@@ -87,6 +90,7 @@ bot.on('message', async (msg) => {
                 inline_keyboard: [
                     [{text: 'Wallet address', callback_data: 'option1'}],
                     [{text: 'Contract address', callback_data: 'option2'}],
+                    [{text: 'Wallet addresses', callback_data: 'option3'}],
                 ]
             })
         };

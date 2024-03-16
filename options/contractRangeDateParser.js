@@ -1,243 +1,301 @@
+const Web3 = require('web3');
 const fs = require('fs');
 const ExcelJS = require('exceljs');
 
-const {getBasePrice, getTokenHistoryTransactions, getTokenBalances, getHistoryTrades, getHistoryTokenPrice} = require('../api');
+const {
+    getAddressListTransaction,
+    getContractAddressTransactions,
+    getAddressTransactionsSorted,
+} = require('../api/etherscan');
+const {getEthereumPrice, getWalletBalance} = require('../api/crypto');
 
-const contractRangeDateParser = async (dates, bot, chatId, addressState) => {
-    try {
-        const date = dates.split('/');
+const {ERC20_ABI} = require('../constants/erc2_abi');
 
-        const startDate = new Date(date[0]);
-        const endDate = new Date(date[1]);
+const web3 = new Web3(`https://mainnet.infura.io/v3/${process.env.INFURA_API_KEY}`);
 
-        const unixStartTime = Math.floor(startDate.getTime() / 1000);
-        const unixEndTime = Math.floor(endDate.getTime() / 1000);
+const contractRangeDateParser = async (address, bot, chatId, addressState) => {
+    const addressTokenTransactions = await getAddressTransactionsSorted(addressState);
+    const parts = address.split('/');
+    const startDate = new Date(parts[0]);
+    const endDate = new Date(parts[1]);
+    const unixStartTime = Math.floor(startDate.getTime() / 1000);
+    const unixEndTime = Math.floor(endDate.getTime() / 1000);
 
-        const basePrice = await getBasePrice();
-        const trades = await getHistoryTrades(addressState, unixStartTime);
+    const filteredTransactions = addressTokenTransactions.filter(tx => {
+        const txTime = parseInt(tx.timeStamp, 10);
+        return txTime >= unixStartTime && txTime <= unixEndTime;
+    });
 
-        const filteredTrades = trades
-            .filter(trade => trade?.blockUnixTime >= unixStartTime && trade?.blockUnixTime <= unixEndTime)
-            .filter(trade => trade?.side === 'buy')
-        const buyers = new Set();
+    const buyers = new Set();
 
-        let symbol = filteredTrades[0].to.symbol;
+    await Promise.all(filteredTransactions.map(async (tx) => {
+        const isAddress = await web3.eth.getCode(tx.to);
+        if (isAddress === '0x') {
+            buyers.add(tx.to);
+        }
+    }))
 
-        filteredTrades.map((trade) => {
-            buyers.add(trade?.owner);
-        })
+    const ethereumPrice = await getEthereumPrice();
 
-        let results = [];
-        for (const address of Array.from(buyers)) {
-            let transactionsHistory = [];
-            let tokenBalances = [];
-            try {
-                transactionsHistory = await getTokenHistoryTransactions(address);
-            } catch (error) {
-                console.error(`Error fetching transaction history for address ${address}:`, error);
-                continue;
-            }
+    let results = [];
+    let contactSymbol;
 
-            try {
-                tokenBalances = await getTokenBalances(address);
-            } catch (error) {
-                console.error(`Error fetching token balances for address ${address}:`, error);
-                continue;
-            }
+    for (let contract of Array.from(buyers)) {
+        const walletBalance = await getWalletBalance(contract);
 
-            if (transactionsHistory && tokenBalances) {
-                async function aggregateResults(data) {
-                    const rawResults = await Promise.all(data.map(async (transaction) => {
-                        const tokenChanges = transaction.balanceChange;
-                        let result = {txHash: transaction.txHash, tokenAddress: '', spent: 0, received: 0};
+        const tokenContract = new web3.eth.Contract(ERC20_ABI, addressState);
+        const symbol = await tokenContract.methods.symbol().call();
+        const decimals = await tokenContract.methods.decimals().call();
 
-                        if (tokenChanges.length === 1) {
-                            const {address: tokenAddress, amount} = tokenChanges[0];
-                            if (amount < 0) {
-                                const amountInTokens = Math.abs(amount) / Math.pow(10, 18);
-                                var date = new Date(transaction.blockTime);
-                                var unixTime = date.getTime() / 1000
-                                const tokenPriceUSD = await getHistoryTokenPrice(tokenAddress, unixTime);
-                                console.log('tokenPriceUSD', tokenPriceUSD)
-                                const received = (amountInTokens * tokenPriceUSD) / ethPriceUSD
-                                result.tokenAddress = tokenAddress;
-                                result.received = received;
-                            }
-                        } else if (tokenChanges.length > 1) {
-                            const ethChange = tokenChanges.find(change => change.address.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
-                            if (ethChange && ethChange.amount < 0) {
-                                const spent = Math.abs(ethChange.amount) / Math.pow(10, 18);
-                                result.spent = spent;
-                                result.tokenAddress = tokenChanges.find(change => change.address.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee').address;
-                            }
-                        }
-                        return result;
-                    }));
+        const balance = walletBalance.find(i => i.address.toLowerCase() === addressState.toLowerCase()) || 0;
 
+        contactSymbol = symbol;
 
-                    const aggregatedResults = rawResults.reduce((acc, {tokenAddress, spent, received}) => {
-                        if (!acc[tokenAddress]) {
-                            acc[tokenAddress] = {tokenAddress, spent: 0, received: 0};
-                        }
-                        acc[tokenAddress].spent += spent;
-                        acc[tokenAddress].received += received;
-                        return acc;
-                    }, {});
+        const ethResults = [];
+        let totalSpent = 0;
+        let totalReceived = 0;
 
+        const addressListTransactions = await getAddressListTransaction(contract);
 
-                    return Object.values(aggregatedResults);
-                }
+        const contractAddressTransactions = await getContractAddressTransactions(contract, addressState);
 
-                const tokenSummary = await aggregateResults(transactionsHistory)
+        const uniqueData = Array.from(
+            contractAddressTransactions.reduce((map, obj) => map.set(obj.hash, obj), new Map()).values()
+        );
 
-                let profit;
-                let spent;
-                let received;
-                let tokenSymbol;
-                if (tokenSummary[addressState]) {
-                    spent = tokenSummary.spent
-                    received = tokenSummary.received
-                    tokenSymbol = tokenSummary.tokenAddress
-                    profit = received + spent;
-                } else {
-                    const trade = filteredTrades.findLast(i => i.owner === address && i.side === 'buy')
-                    spent = trade.from.amount / Math.pow(10, 18)
-                    received = 0
-                    tokenSymbol = trade.to.address
-                    profit = received + spent;
-                }
+        const buyersTxTr = new Set();
 
-                const tokenBalance = tokenBalances.find(i => i.address === tokenSymbol);
+        let totalGasPrice;
 
-                const tokenValue = tokenBalance ? tokenBalance.valueUsd : 0;
-
-                const tokenBalanceInSOL = tokenValue / basePrice;
-
-                const pnl = tokenBalanceInSOL + profit;
-
-                const transfer = tokenBalanceInSOL === 0 && spent === 0;
-
-                results.push({
-                    tokenName: address,
-                    pnl: Number(pnl.toFixed(2)),
-                    spent: Number(Math.abs(spent.toFixed(2))),
-                    transfer: transfer ? 'TRUE' : 'FALSE',
-                });
-            }
+        if (contractAddressTransactions.length === 0) {
+            totalGasPrice = 0;
+        } else {
+            totalGasPrice = Number(web3.utils.fromWei(contractAddressTransactions[0].gasPrice, 'Gwei'));
         }
 
-        const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('Results');
+        contractAddressTransactions.forEach((tx) => {
+            if (tx.to.toLowerCase() === contract.toLowerCase()) {
+                buyersTxTr.add(tx.hash);
+            }
+        });
 
-        worksheet.columns = [
-            {header: 'Wallet', key: 'tokenName', width: 80},
-            {header: 'PnL', key: 'pnl', width: 20},
-            {header: 'Spent, Ξ', key: 'spent', width: 20},
-            {header: 'Transfer', key: 'transfer', width: 20},
-        ];
+        let totalTokens = 0;
 
-        const greenFill = {
+        await Promise.all(
+            Array.from(buyersTxTr).map(async (i) => {
+                try {
+                    const transactionReceipt = await web3.eth.getTransactionReceipt(i);
+
+                    const wethBuyLog = transactionReceipt.logs.filter(
+                        (logItem) => logItem.address.toLowerCase() === addressState.toLowerCase() && logItem.topics.length === 3
+                    );
+
+                    wethBuyLog.forEach((log) => {
+                        const decodedData = web3.eth.abi.decodeParameters(
+                            [
+                                {
+                                    type: 'uint256',
+                                    name: '_value',
+                                },
+                            ],
+                            log.data,
+                        );
+
+                        const tokenAmount = decodedData._value / 10 ** decimals;
+                        totalTokens += tokenAmount;
+                    });
+                } catch (error) {
+                    console.error('An error occurred:', error);
+                }
+            })
+        );
+
+        let transfer = false;
+
+        await Promise.all(uniqueData.map(async (item, index) => {
+            const transactionReceipt = await web3.eth.getTransactionReceipt(item.hash);
+            const transaction = await web3.eth.getTransaction(item.hash);
+            const methodId = transaction.input.slice(0, 10);
+
+            if (methodId === '0xa9059cbb') {
+                transfer = true;
+            }
+
+            const wethLog = transactionReceipt.logs.filter(logItem => logItem.address === '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' && logItem.topics.length === 2);
+
+            let totalEthAmount = 0;
+            const uniqueWethLog = Array.from(
+                wethLog.reduce((map, obj) => map.set(obj.data, obj), new Map()).values()
+            )
+
+            uniqueWethLog.map(logItem => {
+                const decodedData = web3.eth.abi.decodeParameters(
+                    [
+                        {
+                            type: 'uint256',
+                            name: '_value',
+                        }
+                    ],
+                    logItem.data,
+                );
+                const ethAmount = Web3.utils.fromWei(decodedData._value, 'ether');
+                totalEthAmount += parseFloat(ethAmount);
+            });
+
+            ethResults[index] = {from: item.from, to: item.to, hash: item.hash, totalEthAmount};
+        }));
+
+        ethResults.forEach(result => {
+            if (result.to.toLowerCase() === contract.toLowerCase()) {
+                totalSpent += result.totalEthAmount;
+            }
+            if (result.from.toLowerCase() === contract.toLowerCase()) {
+                totalReceived += result.totalEthAmount;
+            }
+        });
+
+        const balanceInUSD = balance.valueUsd / ethereumPrice;
+
+        const tokenBalance = balance.valueUsd < 100 ? 0 : balanceInUSD - totalSpent;
+
+        const profit = totalReceived - totalSpent;
+
+        const pnl = Number(balanceInUSD.toFixed(10)) + Number(profit.toFixed(3));
+
+        const acquisitionPrice = Number(totalSpent.toFixed(3)) / totalTokens;
+
+        results.push({
+            walletAddress: contract,
+            countTransactions: `# ${addressListTransactions.length}`,
+            pnl: pnl.toFixed(3),
+            avgGasPrice: totalGasPrice.toFixed(0),
+            balance: tokenBalance === 0 ? 0 : tokenBalance.toFixed(3),
+            profit: profit.toFixed(3),
+            totalSpent: totalSpent.toFixed(3),
+            acquisitionPrice: acquisitionPrice.toFixed(15),
+            transfer: `${transfer ? 'TRUE' : 'FALSE'}`,
+            contractAddress: addressState,
+            token: symbol,
+        });
+    }
+
+    const path = `$${contactSymbol} range - ${addressState}.xlsx`;
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Results');
+
+    worksheet.columns = [
+        {header: 'Wallet', key: 'walletAddress', width: 50},
+        {header: 'trns', key: 'countTransactions', width: 10},
+        {header: 'PnL', key: 'pnl', width: 10},
+        {header: 'Spent', key: 'totalSpent', width: 10},
+        {header: 'Gas', key: 'avgGasPrice', width: 10},
+        {header: 'Transfer', key: 'transfer', width: 10},
+        {header: 'unPnL', key: 'balance', width: 10},
+        {header: 'realPnL', key: 'profit', width: 15},
+        {header: 'Acquisition Price, Ξ', key: 'acquisitionPrice', width: 25},
+        {header: 'Contract Address', key: 'contractAddress', width: 50},
+        {header: 'Token', key: 'token', width: 10},
+    ];
+
+    const greenFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: {argb: 'FFEAf7E8'}
+    };
+
+    const redFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: {argb: 'FFF5E9E8'}
+    };
+
+    const trueFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: {argb: 'FFF2A6A3'}
+    };
+
+    const falseFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: {argb: 'FF83B38B'}
+    };
+
+    worksheet.getRow(1).eachCell((cell, colNumber) => {
+        cell.fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: {argb: 'FFD7C7FF'}
+            fgColor: {argb: 'FFBFBFBF'},
         };
 
-        const redFill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: {argb: 'FFF5E9E8'}
+        cell.font = {
+            name: 'Calibri (Body)',
+            size: 14,
+            family: 2,
         };
 
-        const trueFill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: {argb: 'FFF2A6A3'}
-        };
+        if (colNumber === 3) {
+            cell.fill = greenFill;
+        } else if (colNumber === 4) {
+            cell.fill = redFill;
+        }
+    });
 
-        const falseFill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: {argb: 'FF83B38B'}
-        };
+    const borderStyle = {
+        top: {style: 'thin', color: {argb: 'FFBFBFBF'}},
+        left: {style: 'thin', color: {argb: 'FFBFBFBF'}},
+        bottom: {style: 'thin', color: {argb: 'FFBFBFBF'}},
+        right: {style: 'thin', color: {argb: 'FFBFBFBF'}},
+    };
 
-        worksheet.getRow(1).eachCell((cell, colNumber) => {
-            cell.fill = {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: {argb: 'FFBFBFBF'},
-            };
+    worksheet.views = [
+        {state: 'frozen', ySplit: 1}
+    ];
 
+    results.sort((a, b) => b.pnl - a.pnl);
+
+    results.forEach((result, index) => {
+        const row = worksheet.addRow(result);
+        row.eachCell((cell, colNumber) => {
+            cell.border = borderStyle;
             cell.font = {
                 name: 'Calibri (Body)',
                 size: 14,
                 family: 2,
             };
 
-            if (colNumber === 2) {
+
+            if (colNumber === 6) {
+                cell.fill = result.transfer === 'TRUE' ? trueFill : falseFill;
+            }
+
+            if (colNumber === 3) {
                 cell.fill = greenFill;
-            } else if (colNumber === 3) {
+            } else if (colNumber === 4) {
                 cell.fill = redFill;
             }
         });
+    });
 
-        const borderStyle = {
-            top: {style: 'thin', color: {argb: 'FFBFBFBF'}},
-            left: {style: 'thin', color: {argb: 'FFBFBFBF'}},
-            bottom: {style: 'thin', color: {argb: 'FFBFBFBF'}},
-            right: {style: 'thin', color: {argb: 'FFBFBFBF'}},
-        };
+    await workbook.xlsx.writeFile(path);
 
-        worksheet.views = [
-            {state: 'frozen', ySplit: 1}
-        ];
-
-        results.sort((a, b) => b.pnl - a.pnl);
-
-        results.forEach((result, index) => {
-            const row = worksheet.addRow(result);
-            row.eachCell((cell, colNumber) => {
-                cell.border = borderStyle;
-                cell.font = {
-                    name: 'Calibri (Body)',
-                    size: 14,
-                    family: 2,
+    if (fs.existsSync(path)) {
+        bot.sendDocument(chatId, path)
+            .then(() => {
+                fs.unlinkSync(path);
+                const options = {
+                    reply_markup: JSON.stringify({
+                        inline_keyboard: [
+                            [{text: 'Wallet address', callback_data: 'option1'}],
+                            [{text: 'Contract address', callback_data: 'option2'}],
+                            [{text: 'Wallet addresses', callback_data: 'option3'}],
+                        ]
+                    })
                 };
-
-                if (colNumber === 2) {
-                    cell.fill = greenFill;
-                } else if (colNumber === 3) {
-                    cell.fill = redFill;
-                }
-
-                if (colNumber === 4) {
-                    cell.fill = result.transfer === 'TRUE' ? trueFill : falseFill;
-                }
+                bot.sendMessage(chatId, 'Choose an option:', options);
             });
-        });
-
-        const path = `$${symbol} range - ${addressState}.xlsx`;
-
-        await workbook.xlsx.writeFile(path);
-
-        if (fs.existsSync(path)) {
-            bot.sendDocument(chatId, path)
-                .then(() => {
-                    fs.unlinkSync(path);
-                    const options = {
-                        reply_markup: JSON.stringify({
-                            inline_keyboard: [
-                                [{text: 'Wallet address', callback_data: 'option1'}],
-                                [{text: 'Contract address', callback_data: 'option2'}],
-                            ]
-                        })
-                    };
-                    bot.sendMessage(chatId, 'Choose an option:', options);
-                });
-        }
-    } catch (error) {
-        console.error(`Помилка при обробці гаманця: ${addressState}`);
-        console.error(error);
     }
-};
+}
 
 module.exports = {contractRangeDateParser};
