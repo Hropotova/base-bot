@@ -332,7 +332,7 @@ const walletParser = async (addresses, bot, chatId) => {
 
                 const winPercentage = (winCount / results.length) * 100;
                 const averagePnl = totalPnl / results.length;
-                if (true) {
+                if (winPercentage >= process.env.WIN_RATE && averagePnl >= process.env.AVARAGE_PNL) {
                     const path = `${winPercentage.toFixed(0)}% ${averagePnl.toFixed(2)}eth - ${address}.xlsx`;
 
                     await workbook.xlsx.writeFile(path);
