@@ -10,7 +10,7 @@ const {
 const {getEthereumPrice, getWalletBalance, getTokenPrice} = require('../api/crypto');
 const {ERC20_ABI} = require('../constants/erc2_abi');
 
-const web3 = new Web3(`https://base-mainnet.g.alchemy.com/v2/UO8879aP4CewayIBNOeZsaWkX4no-L7M`);
+const web3 = new Web3(`https://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`);
 
 const walletParser = async (addresses, bot, chatId) => {
     const sortAddresses = addresses.split('\n');
