@@ -39,167 +39,171 @@ const walletParser = async (addresses, bot, chatId) => {
                 let results = [];
 
                 for (let contract of tokenContracts) {
-                    console.log(contract);
-                    const contractAddressTransactions = await getContractAddressTransactions(address, contract);
-                    const parseTransaction = await web3.eth.getTransactionReceipt(contractAddressTransactions[0].hash);
+                    try {
+                        console.log(contract);
+                        const contractAddressTransactions = await getContractAddressTransactions(address, contract);
+                        const parseTransaction = await web3.eth.getTransactionReceipt(contractAddressTransactions[0].hash);
 
-                    const tokenAddress = parseTransaction.logs.filter(
-                        (logItem) => logItem.address.toLowerCase() === contract.toLowerCase()
-                    );
-
-                    const contractAddress = tokenAddress[0].address;
-
-                    const tokenPrice = await getTokenPrice(contractAddress);
-
-                    const tokenContract = new web3.eth.Contract(ERC20_ABI, contract);
-                    const symbol = await tokenContract.methods.symbol().call();
-                    const decimals = await tokenContract.methods.decimals().call();
-                    const tokenBalance = await tokenContract.methods.balanceOf(address).call();
-                    const balanceInToken = tokenBalance / Math.pow(10, decimals);
-
-                    let priceInUSD = tokenPrice?.value ? tokenPrice?.value : 0;
-                    let tokenLiquidity = tokenPrice?.liquidity ? tokenPrice?.liquidity / ethereumPrice : 100000000000000;
-                    const balance = walletBalance.find(i => i.address.toLowerCase() === contract.toLowerCase()) || 0;
-
-                    const ethResults = [];
-
-                    let totalSpent = 0;
-                    let totalReceived = 0;
-                    const responseData = transactionMap[contract] || [];
-                    const uniqueData = Array.from(
-                        responseData.reduce((map, obj) => map.set(obj.hash, obj), new Map()).values()
-                    );
-                    const buyersTxTr = new Set();
-
-                    contractAddressTransactions.forEach((tx) => {
-                        if (tx.to.toLowerCase() === contract.toLowerCase()) {
-                            buyersTxTr.add(tx.hash);
-                        }
-                    });
-
-                    let totalTokens = 0;
-
-                    await Promise.all(
-                        Array.from(uniqueData).map(async (i) => {
-                            try {
-                                const transactionReceipt = await web3.eth.getTransactionReceipt(i.hash);
-
-                                const wethBuyLog = transactionReceipt.logs.filter(
-                                    (logItem) => logItem.address.toLowerCase() === contract.toLowerCase() && logItem.topics.length === 3
-                                );
-
-                                wethBuyLog.forEach((log) => {
-                                    const decodedData = web3.eth.abi.decodeParameters(
-                                        [
-                                            {
-                                                type: 'uint256',
-                                                name: '_value',
-                                            },
-                                        ],
-                                        log.data
-                                    );
-
-                                    const tokenAmount = decodedData._value / 10 ** decimals;
-                                    totalTokens += tokenAmount;
-                                });
-                            } catch (error) {
-                                console.error('An error occurred:', error);
-                            }
-                        })
-                    );
-
-                    let transfer = false;
-                    let scumDelete = false;
-
-                    await Promise.all(uniqueData.map(async (item, index) => {
-                        const transactionReceipt = await web3.eth.getTransactionReceipt(item.hash);
-                        const transaction = await web3.eth.getTransaction(item.hash);
-                        const methodId = transaction.input.slice(0, 10);
-
-                        if (methodId === '0xa9059cbb') {
-                            transfer = true;
-                        }
-
-                        if (transaction.from.toLowerCase() !== address.toLowerCase()) {
-                            scumDelete = true
-                        }
-
-                        let wethLog = transactionReceipt.logs.filter(logItem => logItem.address.toLowerCase() === '0x4200000000000000000000000000000000000006'.toLowerCase() && logItem.topics.length === 2);
-                        if (wethLog.length === 0) {
-                            wethLog = transactionReceipt.logs.filter(logItem => logItem.address.toLowerCase() === '0x4200000000000000000000000000000000000006'.toLowerCase() && logItem.topics.length === 3);
-                        }
-
-                        let totalEthAmount = 0;
-
-                        const uniqueWethLog = Array.from(
-                            wethLog.reduce((map, obj) => map.set(obj.data, obj), new Map()).values()
+                        const tokenAddress = parseTransaction.logs.filter(
+                            (logItem) => logItem.address.toLowerCase() === contract.toLowerCase()
                         );
 
-                        uniqueWethLog.map(logItem => {
-                            const decodedData = web3.eth.abi.decodeParameters(
-                                [
-                                    {
-                                        type: 'uint256',
-                                        name: '_value'
-                                    }
-                                ],
-                                logItem.data
+                        const contractAddress = tokenAddress[0].address;
+
+                        const tokenPrice = await getTokenPrice(contractAddress);
+
+                        const tokenContract = new web3.eth.Contract(ERC20_ABI, contract);
+                        const symbol = await tokenContract.methods.symbol().call();
+                        const decimals = await tokenContract.methods.decimals().call();
+                        const tokenBalance = await tokenContract.methods.balanceOf(address).call();
+                        const balanceInToken = tokenBalance / Math.pow(10, decimals);
+
+                        let priceInUSD = tokenPrice?.value ? tokenPrice?.value : 0;
+                        let tokenLiquidity = tokenPrice?.liquidity ? tokenPrice?.liquidity / ethereumPrice : 100000000000000;
+                        const balance = walletBalance.find(i => i.address.toLowerCase() === contract.toLowerCase()) || 0;
+
+                        const ethResults = [];
+
+                        let totalSpent = 0;
+                        let totalReceived = 0;
+                        const responseData = transactionMap[contract] || [];
+                        const uniqueData = Array.from(
+                            responseData.reduce((map, obj) => map.set(obj.hash, obj), new Map()).values()
+                        );
+                        const buyersTxTr = new Set();
+
+                        contractAddressTransactions.forEach((tx) => {
+                            if (tx.to.toLowerCase() === contract.toLowerCase()) {
+                                buyersTxTr.add(tx.hash);
+                            }
+                        });
+
+                        let totalTokens = 0;
+
+                        await Promise.all(
+                            Array.from(uniqueData).map(async (i) => {
+                                try {
+                                    const transactionReceipt = await web3.eth.getTransactionReceipt(i.hash);
+
+                                    const wethBuyLog = transactionReceipt.logs.filter(
+                                        (logItem) => logItem.address.toLowerCase() === contract.toLowerCase() && logItem.topics.length === 3
+                                    );
+
+                                    wethBuyLog.forEach((log) => {
+                                        const decodedData = web3.eth.abi.decodeParameters(
+                                            [
+                                                {
+                                                    type: 'uint256',
+                                                    name: '_value',
+                                                },
+                                            ],
+                                            log.data
+                                        );
+
+                                        const tokenAmount = decodedData._value / 10 ** decimals;
+                                        totalTokens += tokenAmount;
+                                    });
+                                } catch (error) {
+                                    console.error('An error occurred:', error);
+                                }
+                            })
+                        );
+
+                        let transfer = false;
+                        let scumDelete = false;
+
+                        await Promise.all(uniqueData.map(async (item, index) => {
+                            const transactionReceipt = await web3.eth.getTransactionReceipt(item.hash);
+                            const transaction = await web3.eth.getTransaction(item.hash);
+                            const methodId = transaction.input.slice(0, 10);
+
+                            if (methodId === '0xa9059cbb') {
+                                transfer = true;
+                            }
+
+                            if (transaction.from.toLowerCase() !== address.toLowerCase()) {
+                                scumDelete = true
+                            }
+
+                            let wethLog = transactionReceipt.logs.filter(logItem => logItem.address.toLowerCase() === '0x4200000000000000000000000000000000000006'.toLowerCase() && logItem.topics.length === 2);
+                            if (wethLog.length === 0) {
+                                wethLog = transactionReceipt.logs.filter(logItem => logItem.address.toLowerCase() === '0x4200000000000000000000000000000000000006'.toLowerCase() && logItem.topics.length === 3);
+                            }
+
+                            let totalEthAmount = 0;
+
+                            const uniqueWethLog = Array.from(
+                                wethLog.reduce((map, obj) => map.set(obj.data, obj), new Map()).values()
                             );
-                            const ethAmount = Web3.utils.fromWei(decodedData._value, 'ether');
-                            totalEthAmount += parseFloat(ethAmount);
+
+                            uniqueWethLog.map(logItem => {
+                                const decodedData = web3.eth.abi.decodeParameters(
+                                    [
+                                        {
+                                            type: 'uint256',
+                                            name: '_value'
+                                        }
+                                    ],
+                                    logItem.data
+                                );
+                                const ethAmount = Web3.utils.fromWei(decodedData._value, 'ether');
+                                totalEthAmount += parseFloat(ethAmount);
+                            });
+
+                            ethResults[index] = {from: item.from, to: item.to, hash: item.hash, totalEthAmount};
+                        }));
+
+                        ethResults.forEach(result => {
+                            if (result.to.toLowerCase() === address.toLowerCase()) {
+                                totalSpent += result.totalEthAmount;
+                            }
+                            if (result.from.toLowerCase() === address.toLowerCase()) {
+                                totalReceived += result.totalEthAmount;
+                            }
                         });
 
-                        ethResults[index] = {from: item.from, to: item.to, hash: item.hash, totalEthAmount};
-                    }));
+                        let balanceInETH;
 
-                    ethResults.forEach(result => {
-                        if (result.to.toLowerCase() === address.toLowerCase()) {
-                            totalSpent += result.totalEthAmount;
+                        if (balance?.valueUsd) {
+                            balanceInETH = (balance ? balance.valueUsd : 0) / ethereumPrice || 0;
+                        } else {
+                            balanceInETH = (balanceInToken * priceInUSD) / ethereumPrice || 0;
                         }
-                        if (result.from.toLowerCase() === address.toLowerCase()) {
-                            totalReceived += result.totalEthAmount;
+
+                        if (tokenLiquidity < process.env.LIQUIDITY) {
+                            console.log('liquidity', tokenLiquidity)
+                            balanceInETH = 0
                         }
-                    });
 
-                    let balanceInETH;
+                        console.log('totalReceived', totalReceived);
+                        console.log('totalSpent', totalSpent);
+                        const realisedProfit = totalReceived - totalSpent;
+                        const unrealisedProfit = balanceInETH - totalSpent;
 
-                    if (balance?.valueUsd) {
-                        balanceInETH = (balance ? balance.valueUsd : 0) / ethereumPrice || 0;
-                    } else {
-                        balanceInETH = (balanceInToken * priceInUSD) / ethereumPrice || 0;
-                    }
+                        let pnl
 
-                    if (tokenLiquidity < process.env.LIQUIDITY) {
-                        console.log('liquidity', tokenLiquidity)
-                        balanceInETH = 0
-                    }
+                        pnl = Number(balanceInETH.toFixed(10)) + Number(realisedProfit.toFixed(3));
 
-                    console.log('totalReceived', totalReceived);
-                    console.log('totalSpent', totalSpent);
-                    const realisedProfit = totalReceived - totalSpent;
-                    const unrealisedProfit = balanceInETH - totalSpent;
+                        const acquisitionPrice = Number(totalSpent.toFixed(10)) / totalTokens
 
-                    let pnl
-
-                    pnl = Number(balanceInETH.toFixed(10)) + Number(realisedProfit.toFixed(3));
-
-                    const acquisitionPrice = Number(totalSpent.toFixed(10)) / totalTokens
-
-                    if (symbol !== 'UNI-V2' && symbol !== 'USDT' && symbol !== 'WETH' && symbol !== 'DAI' && symbol !== 'USDC') {
-                        results.push({
-                            token: symbol,
-                            countTransactions: addressListTransactions.length,
-                            pnl: pnl.toFixed(3),
-                            unrealisedProfit: `${unrealisedProfit.toFixed(10)}`,
-                            acquisitionPrice: acquisitionPrice.toFixed(15),
-                            contractAddress: contract,
-                            totalSpent: totalSpent.toFixed(3),
-                            totalReceived: totalReceived.toFixed(3),
-                            realisedProfit: realisedProfit.toFixed(3),
-                            transfer: `${transfer ? 'TRUE' : 'FALSE'}`,
-                            scumDelete: scumDelete,
-                            uniqueData: uniqueData,
-                        });
+                        if (symbol !== 'UNI-V2' && symbol !== 'USDT' && symbol !== 'WETH' && symbol !== 'DAI' && symbol !== 'USDC') {
+                            results.push({
+                                token: symbol,
+                                countTransactions: addressListTransactions.length,
+                                pnl: pnl.toFixed(3),
+                                unrealisedProfit: `${unrealisedProfit.toFixed(10)}`,
+                                acquisitionPrice: acquisitionPrice.toFixed(15),
+                                contractAddress: contract,
+                                totalSpent: totalSpent.toFixed(3),
+                                totalReceived: totalReceived.toFixed(3),
+                                realisedProfit: realisedProfit.toFixed(3),
+                                transfer: `${transfer ? 'TRUE' : 'FALSE'}`,
+                                scumDelete: scumDelete,
+                                uniqueData: uniqueData,
+                            });
+                        }
+                    } catch (e) {
+                        console.log(e);
                     }
                 }
 
