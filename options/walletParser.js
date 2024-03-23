@@ -301,7 +301,7 @@ const walletParser = async (addresses, bot, chatId) => {
                     {state: 'frozen', ySplit: 1}
                 ];
 
-                results = results.filter(result => !((result.scumDelete === true && result.scam === '🍯TRUE') || (result.scumDelete === true && result.uniqueData.length === 1)));
+                results = results.filter(result => ((result.scumDelete !== true)));
                 results.sort((a, b) => b.pnl - a.pnl);
 
                 results.forEach((result, index) => {
